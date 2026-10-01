@@ -1,0 +1,47 @@
+name: Build Relay.exe
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile with the C# compiler built into Windows
+        shell: pwsh
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path $csc)) { throw "csc.exe not found at $csc" }
+          & $csc /nologo /target:exe /optimize+ /out:Relay.exe `
+            /r:System.Web.Extensions.dll `
+            /resource:index.html,Relay.index.html `
+            Relay.cs
+          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item Relay.exe, "How to use.txt" dist/
+          Compress-Archive -Path dist/* -DestinationPath Relay-windows.zip -Force
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Relay-windows
+          path: dist/
+
+      - name: Publish release (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" Relay-windows.zip --title "Relay ${{ github.ref_name }}" --generate-notes
